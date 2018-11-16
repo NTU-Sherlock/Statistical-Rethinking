@@ -1,0 +1,193 @@
+---
+title: "Assignment 3 - Height and Weight - Quadratic Approximation"
+author: "Wen-Shiuan, Liang"
+date: "10/14/2017"
+output:
+  word_document: default
+  html_document: default
+---
+#Question 1
+
+###By using the Howell1 data mentioned in the class, the weights listed below were recorded in the !Kung census, but heights were not recorded for these individuals. Provide predicted heights and 89% intervals (either HPDI or PI) for each of these individuals. That is, fill in the table below, using model-based predictions.
+
+Import the data and build the model
+
+```{r, results="hide",message=FALSE}
+library(rethinking)
+```
+
+```{r}
+data("Howell1")
+data = Howell1
+model1 = map(
+  alist(
+    height ~ dnorm(mu,sigma),
+    mu <- a + b*weight,
+    a ~ dnorm(156,100),
+    b ~ dnorm(0,10),
+    sigma ~ dunif(0,50)
+    ),
+  data = data)
+precis(model1)
+```
+
+Set Posterior
+```{r}
+post = extract.samples(model1) 
+post[1:5,]
+```
+
+Predict the height for 46.95, 43.72, 64.78, 32.59, 54.63
+
+```{r}
+mu.link = function(weight) post$a + post$b*weight
+weight.seq = c(46.95, 43.72, 64.78, 32.59, 54.63)
+mu = sapply(weight.seq, mu.link)
+```
+
+####Expected height, 89% interval are as follow
+
+```{r}
+(mu.mean = apply(mu,2,mean))
+(mu.HPDI = apply(mu,2,HPDI))
+(mu.PI = apply(mu,2,PI))
+```
+
+#Question 2
+###Select out all the rows in the Howell1 data with ages below 18 years of age. If you do it right, you should end up with a new data frame with 192 rows in it.
+
+```{r}
+d2 = data[data$age<18,]
+```
+
+####(a) Fit a linear regression to these data, using map. Present and interpret the estimates. For every 10 units of increase in weight, how much taller does the model predict a child gets?
+
+Orignal Linear Regression is as follow(only change data)
+
+```{r}
+model1 = map(
+  alist(
+    height ~ dnorm(mu,sigma),
+    mu <- a + b*weight,
+    a ~ dnorm(156,100),
+    b ~ dnorm(0,10),
+    sigma ~ dunif(0,50)
+    ),
+  data = d2)
+precis(model1)
+
+```
+
+
+```{r}
+post = extract.samples(model1) 
+mu.link = function(weight) post$a + post$b*weight
+weight.seq = seq( from = 2, to = 70, by = 1)
+mu = sapply(weight.seq, mu.link)
+mu.mean = apply(mu,2,mean)
+plot(height ~ weight, data = d2, col = col.alpha(rangi2,0.5))
+lines(weight.seq,mu.mean)
+```
+
+```{r}
+model2 = map(
+  alist(
+    height ~ dnorm(mu,sigma),
+    mu <- a + b*weight,
+    a ~ dnorm(110,100),
+    b ~ dnorm(0,10),
+    sigma ~ dunif(0,50)
+    ),
+  data = d2)
+precis(model2)
+```
+
+####It seems that there is no change in beta between model1 and model2, with changing the dnorm parameters. 
+####The linear regression model predict that every 10 addtional kg would increase 27 cm in height 
+
+####(b) Plot the raw data, with height on the vertical axis and weight on the horizontal axis. Superimpose the MAP regression line and 89% HPDI for the mean. Also superimpose the 89% HPDI for predicted heights.
+
+take a look at the plot
+
+```{r}
+post2 = extract.samples(model2)
+mu.link2 = function(weight) post2$a + post2$b*weight
+weight.seq2 = seq( from = 2, to = 70, by = 1)
+mu2 = sapply(weight.seq2, mu.link2)
+mu.mean2 = apply(mu2,2,mean)
+#The MAP line
+plot(height ~ weight, data = d2, col = col.alpha(rangi2,0.5))
+lines(weight.seq2,mu.mean2)
+
+#Plot a shaded region for 89% HPDI
+mu.HPDI2 = apply(mu2, 2, HPDI)
+shade(mu.HPDI2, weight.seq2)
+
+# superimpose the 89% HPDI for predicted heights.
+sim.height = sim(model2, data = list(weight = weight.seq2))
+height.HPDI = apply(sim.height, 2, HPDI)
+shade(height.HPDI, weight.seq2)
+```
+
+####(c) What aspects of the model fit concern you? Describe the kinds of assumption you would change, if any, to improve your model. You don’t have to write any new code. Just explain what the model appears to be doing a bad job of, and what you hypothesize would be a better model.
+
+#####The model predict badly those children who weights more than 35 kg, yet it does well between the weight from 8 - 35. From question 1 we can see that: It seems !Kung people are not likely to grow higher than 160 cm. That's why the gain in weight could not imply higher height after 160 cm. So a linear model could not fit well. 
+#####Base on this, I would rule out the out those childern who gain more than 35 kg and re-run the model.
+
+
+#Question 3
+###Suppose a colleague of yours, who works on allometry, glances at the practice problems just above. (In Question 2). You colleague exclaims, “That’s silly. Everyone knows that it’s only the logarithm of body weight that scales with height!” Let’s take your colleague’s advice and see what happens.
+
+####(a) Model the relationship between height (cm) and the natural logarithm of weight (log-kg). Use the entire Howell1 data frame, all 544 rows, adults and non-adults. Fit this model, using quadratic approximation:h𝑖 ~𝑁𝑜𝑟𝑚𝑎𝑙(𝜇𝑖 , 𝜎)
+𝜇𝑖 =𝛼+𝛽log(𝑤𝑖)
+𝛼~𝑁𝑜𝑟𝑚𝑎𝑙(178,100)
+𝛽~𝑁𝑜𝑟𝑚𝑎𝑙(0,100)
+𝜎~𝑈𝑛𝑖𝑓𝑜𝑟𝑚(0,50)
+####where h𝑖 is the height of individual 𝑖 and 𝑤𝑖 is the weight (in kg) of individual 𝑖. The function for computing a natural log in R is just log. Can you interpret the resulting estimates?
+
+
+```{r}
+model3 = map(
+  alist(
+    height ~ dnorm(mu,sigma),
+    mu <- a + b*log(weight),
+    a ~ dnorm(178,100),
+    b ~ dnorm(0,100),
+    sigma ~ dunif(0,50)
+    ),
+  data = data)
+precis(model3)
+```
+
+######Beta has larger because of log, while the interpretation would change. In this case, the model predicts that 1% gained in weight would increase 0.47% height.
+
+With reference from this site:http://www.cazaar.com/ta/econ113/interpreting-beta
+"If we increase x by one percent, we expect y to increase by (β1/100) units of y."
+
+####(b) Begin with this plot:
+
+```{r}
+plot(height~weight, data=Howell1, col=col.alpha(rangi2, 0.4))
+```
+
+####Then use samples from the quadratic approximate posterior of the model in (a) to superimpose on the plot: (1) the predicted mean height as a function of weight, (2) the 97% HPDI for the mean, and (3) the 97% HPDI for predicted heights.
+
+```{r}
+post3 = extract.samples(model3)
+mu.link3 = function(weight) post3$a + post3$b*weight
+weight.seq3 = seq( from = 2, to = 70, by = 1)
+mu3 = sapply(weight.seq3, mu.link2)
+mu.mean3 = apply(mu3,2,mean)
+#The MAP line
+plot(height~weight, data=Howell1, col=col.alpha(rangi2, 0.4))
+lines(weight.seq3,mu.mean3)
+
+#Plot a shaded region for 97% HPDI
+mu.HPDI3 = apply(mu3, 2, HPDI,prob = .97)
+shade(mu.HPDI3, weight.seq3)
+
+# superimpose the 97% HPDI for predicted heights.
+sim.height3 = sim(model3, data = list(weight = weight.seq3))
+height.HPDI3 = apply(sim.height3, 2, HPDI,prob = .97)
+shade(height.HPDI3, weight.seq3)
+```

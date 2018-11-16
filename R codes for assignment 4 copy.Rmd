@@ -1,0 +1,231 @@
+---
+title: "Individual Assignment 4"
+Name: "Wen-Shiuan, Liang"
+Student ID: "R05724080"
+date: "10/30/2017"
+output: word_document
+---
+
+#Question1
+###Fit two bivariate Gaussian regressions, using map:
+
+#####Data overview
+```{r, results="hide",message=FALSE}
+library(rethinking)
+data(foxes)
+pairs(~ weight + area + groupsize, data = foxes, col=rangi2 )
+```
+
+'groupsize' seems to be correlated with 'area'.
+
+```{r}
+par(mfrow=c(2,2))
+hist(foxes$weight)
+hist(foxes$groupsize)
+hist(foxes$area)
+hist(log(foxes$groupsize))
+```
+
+Seems that the groupsize is right skewed. Yet it might not be a good choice to logarithm an integer variable with small range.
+The plot is no longer countinous.Perhaps we should still use groupsize instead of log(groupsize).
+
+
+##(1)Body weight as a linear function of territory size (area)
+```{r}
+summary(foxes)
+reg1 = map(
+  alist (
+    weight ~ dnorm( mu , sigma ) ,
+    mu <- a + bR * area ,
+    a ~ dnorm( 5 , 5 ) ,
+    bR ~ dnorm( 0 , 10 ) ,
+    sigma ~ dunif( 0 , 10 )
+  ) , data = foxes)
+precis(reg1,digits=5)
+```
+
+
+```{r}
+area.seq <- seq( from=1 , to=5 , length.out=30 )
+mu <- link( reg1 , data=data.frame(area=area.seq) )
+mu.PI <- apply( mu , 2 , PI )
+
+# plot it all
+plot( weight ~ area , data=foxes , col=rangi2 )
+abline( reg1 )
+shade( mu.PI , area.seq )
+
+```
+
+##(2) body weight as a linear function of groupsize. Plot the results of these regressions, displaying the MAP regression line and the 95% interval of the mean.
+
+```{r}
+reg2 = map(
+  alist (
+    weight ~ dnorm( mu , sigma ) ,
+    mu <- a + bR * groupsize ,
+    a ~ dnorm( 5 , 5 ) ,
+    bR ~ dnorm( 0 , 10 ) ,
+    sigma ~ dunif( 0 , 10 )
+  ) , data = foxes)
+precis(reg1,digits=5)
+```
+
+
+
+```{r}
+groupsize.seq <- seq( from=2 , to=8 , length.out=30 )
+mu <- link( reg2 , data=data.frame(groupsize=groupsize.seq) )
+mu.PI <- apply( mu , 2 , PI )
+
+par(mfrow=c(1,2))
+# plot it all (HPDI)
+plot( weight ~ groupsize , data=foxes , col=rangi2 )
+abline(reg2)
+shade(mu.PI , groupsize.seq)
+mu.HPDI <- apply( mu , 2 , HPDI,prob=.95 )
+# plot it all (PI)
+plot( weight ~ groupsize , data = foxes , col=rangi2 )
+abline(reg2)
+shade(mu.HPDI , groupsize.seq)
+```
+
+It seems that HPDI has a bit thinner shade area than PI. (Not sure the reason)
+
+
+######Since the 95% of beta coeficient has covered 0, neither area nor groupsize is significant solely.
+
+
+#Question2
+###Now fit a multiple linear regression with weight as the outcome and both area and groupsize as predictor variables. Plot the predictions of the model for each predictor, holding the other predictor constant at its mean. 
+
+```{r}
+mreg1 = map(
+  alist (
+    weight ~ dnorm( mu , sigma ) ,
+    mu <- a + b1 * groupsize+ b2 * area ,
+    a ~ dnorm( 5 , 5 ) ,
+    b1 ~ dnorm( 0 , 10 ) ,
+    b2 ~ dnorm( 3 , 5 ) ,
+    sigma ~ dunif( 0 , 10 )
+  ) , data = foxes)
+precis(mreg1,digits=5)
+```
+
+```{r}
+#Prepare counterfactual data
+G.avg = mean(foxes$groupsize)
+A.seq = seq( from = 1, to = 5.5, length.out = 30)
+pred.data = data.frame(
+  groupsize = G.avg,
+  area = A.seq)
+
+#Compute counterfactual mean weight (mu)
+mu = link(mreg1, data = pred.data)
+mu.mean =  apply(mu, 2, mean)
+mu.PI = apply( mu, 2, PI)
+
+#Simulate counterfactual weight outcomes
+A.sim = sim(mreg1, data = pred.data, n=1e4)
+A.PI = apply(A.sim,2,PI)
+```
+
+```{r}
+#display predictions, hiding ras data with type = 'n'
+plot( weight ~ area, data = foxes, type = 'n')
+mtext('group size  = 4.3')
+lines ( A.seq,mu.mean)
+shade(mu.PI, A.seq)
+shade(A.PI, A.seq)
+```
+
+```{r}
+#Prepare counterfactual data again for groupsize
+A.avg = mean(foxes$area)
+G.seq = seq( from = 2, to = 8, length.out = 30)
+pred.data2 = data.frame(
+  groupsize = G.seq,
+  area = A.avg)
+
+#Compute counterfactual mean weight (mu)
+mu = link(mreg1, data = pred.data2)
+mu.mean =  apply(mu, 2, mean)
+mu.PI = apply( mu, 2, PI)
+
+#Simulate counterfactual weight outcomes
+G.sim = sim(mreg1, data = pred.data2, n=1e4)
+G.PI = apply(G.sim,2,PI)
+```
+
+```{r}
+#display predictions, hiding ras data with type = 'n'
+plot( weight ~ groupsize, data = foxes, type = 'n')
+mtext('area = 3.2')
+lines ( G.seq,mu.mean)
+shade(mu.PI, G.seq)
+shade(G.PI, G.seq)
+```
+
+###What does this model say about the importance of each variable?
+######Controling each variable could still produce correlation with dependent variable, telling that both variables, groupsize and area are necessary and significant.
+
+###Why do you get different results than you got in the questions just above?
+######The contrast result of Q1 and Q2 might imply that there exists "Masked association" between predictors. That is, since 'groupsize' and 'area' has 'opposite influence' to weight in simple regressions, thus the sole effect may be eliminated by the other unobserved variables. However, adding both variables in multiregression could control the effect and produce significant outcomes for both variables.
+
+
+#Question3
+##Finally consider the avgfood variable. Fit two more multiple regressions:
+###(1) body weight as an additive function of avgfood and groupsize
+
+```{r}
+mreg2 = map(
+  alist (
+    weight ~ dnorm( mu , sigma ) ,
+    mu <- a + b1 * groupsize+b3*avgfood ,
+    a ~ dnorm( 5 , 5 ) ,
+    b1 ~ dnorm( 0 , 10 ) ,
+    b3 ~ dnorm( 0 , 10 ), 
+    sigma ~ dunif( 0 , 10 )
+  ) , data = foxes)
+precis(mreg2,digits=5)
+plot(precis(mreg2,digits=5))
+```
+
+##(2) body weight as an additive function of all three variables, avgfood and groupsize and area. 
+```{r}
+mreg3 = map(
+  alist (
+    weight ~ dnorm( mu , sigma ) ,
+    mu <- a + b1 * groupsize+ b2*area+b3*avgfood ,
+    a ~ dnorm( 5 , 5 ) ,
+    b1 ~ dnorm( 0 , 10 ) ,
+    b2 ~ dnorm( 0 , 10 ) ,
+    b3 ~ dnorm( 0 , 10 ), 
+    sigma ~ dunif( 0 , 10 )
+  ) , data = foxes)
+precis(mreg3,digits=5)
+plot(precis(mreg3,digits=5))
+```
+
+##Compare the results of these models to the previous models you’ve fit, in the first two questions.
+###(a) Is avgfood or area a better predictor of body weight? If you had to choose one or the other to include in a model, which would it be? Support your assessment with any tables or plots you choose.
+```{r}
+precis(mreg1,digits=5)
+precis(mreg2,digits=5)
+par(mfrow=c(1,2))
+plot(precis(mreg1,digits=5))
+plot(precis(mreg2,digits=5))
+```
+######Simply from the above graphes we could conclude that 'avgfood' is a better predictor than 'area', since the beta coeficient is larger(3.75 compare to 0.62), though with higher standard errors (1.2 compare to 0.17). Moreover, we can also find out the influence of 'groupsize' has improve by controling 'avgfood'. As a result, I would still choose 'avgfood' as predictor.
+
+###(b) When both avgfood or area are in the same model, their effects are reduced (closer to zero) and their standard errors are larger than when they are included in separate models. Can you explain this results?
+
+######One possible reason of increasing standard errors could be resulted from multicollinearity. That is, avgfood could be correlated with area.
+
+```{r}
+pairs(~ weight + area + groupsize + avgfood, data = foxes, col=rangi2 )
+cor(foxes$area,foxes$avgfood)
+```
+
+######From the graph and stats can find that area and avgfood are highly correlated(0.88), which is not suprising. Since the larger the terriorty is, the richer the food would be.
+

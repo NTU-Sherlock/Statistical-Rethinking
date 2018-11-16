@@ -1,0 +1,326 @@
+---
+title: "R codes for assignment 6"
+author: "Kyle"
+date: "12/18/2017"
+output:
+  word_document: default
+  html_document: default
+---
+
+```{r}
+rm(list=ls())                        # clear memory 
+library(MASS)
+library(rethinking)
+library(rstan)
+```
+
+
+#Question 1
+###(a)Fit the model above to the eagles data, using both map and map2stan. Is the quadratic approximation okay?
+
+```{r}
+data(eagles)
+d = eagles
+d$pp <- ifelse( d$P=="L" , 1 , 0 )
+d$v <- ifelse( d$V=="L" , 1 , 0 )
+d$aa <- ifelse( d$A=="A" , 1 , 0 )
+m1 <- map(
+  alist(
+    y ~ dbinom( n , p) ,
+    logit(p) <- a + bP*pp + bV*v+ bA*aa ,
+    a ~ dnorm(0,10) ,
+    bP ~ dnorm(0,5) ,
+    bV ~ dnorm(0,5) ,
+    bA ~ dnorm(0,5)
+  ) ,
+  data=d )
+precis(m1)
+```
+
+```{r}
+d2 = d
+d2$recipient = NULL
+m2 <- map2stan(m1,d2,iter=10000 , warmup=1000,chain=2)
+precis(m2)
+coeftab(m1,m2)
+```
+
+
+#####The quadratic results and that of map2stan have similar effect, telling that quadratic approximation are okay.
+##### The coefficient shows that there would be higher chance to succeed if the pirate eagle is big and adult. While if the victim eagle is big, the probability of success would decrease.
+
+###(b)Now interpret the estimates. If the quadratic approximation turned out okay, then it’s okay to use map estimates. Otherwise stick to map2stan estimates. Then plot the posterior predictions. Compute and display both  What different information does each type of posterior prediction provide?
+
+####(1) the predicted probability of success and its 89% interval for each row(i) in the data
+```{r}
+d.pred <- data.frame(
+  pp = c(1,1,1,1,0,0,0,0), 
+  v = c(1,0,1,0,1,0,1,0),
+  aa = c(1,1,0,0,1,1,0,0)
+)
+eagles.ensemble <- ensemble( m1, data=d.pred )
+pred.p <- apply( eagles.ensemble$link , 2 , mean )
+(pred.p.PI <- apply( eagles.ensemble$link , 2 , PI ))
+
+## R code 10.27
+postcheck( m1 , n=1e4 )
+p = link(m1)
+y = sim(m1)
+(pred.p.PI <- apply( p , 2 , PI ))
+##
+```
+
+####(2) the predicted success count and its 89% interval.
+```{r}
+eagles.med <- apply( eagles.ensemble$link , 2 , median )
+eagles.PI <- apply( eagles.ensemble$link , 2 , PI )
+
+plot( 0 , 0 , type="n" , xlab="Pirate Big/Victim Big/Pirate Adult" ,
+      ylab="Proportion of success" , ylim=c(0,1) , xaxt="n" ,
+      xlim=c(1,8) )
+axis( 1 , at=1:8 , labels=c("1/1/1","1/0/1","1/1/0","1/0/0","0/1/1","0/0/1","0/1/0","0/0/0") )
+
+lines( 1:8 , eagles.med , col=rangi2 )
+shade( eagles.PI , 1:8 , col=col.alpha(rangi2,0.2) )
+
+#The counts of 89%PI
+x=as.numeric(d$n)
+counts=data.frame()
+for (i in x){
+  j=which(x==i)
+  counts=rbind(counts, i*pred.p.PI[,j])
+}
+colnames(counts)=c('5%','94%')
+counts
+
+```
+
+#####for plot (1) it shows the posterior prediction of probability of sucess in pirating. For example, the next success rate of pirating for P=1,V=1,A=1. On the other hand,plot (2) shows the posterior predictions of success counts for current n of each type of combination. For example, after 24 trials, what would be the total success numbers of P=1,V=1,A=1.
+
+###(c)Now try to improve the model. Consider an interaction between the pirate’s size and age (immature or adult). Compare this model to the previous one, using WAIC to interpret.
+```{r}
+m1.2 <- map(
+  alist(
+    y ~ dbinom( n , p) ,
+    logit(p) <- a + bP*pp + bV*v+ bA*aa+bPA*pp*aa ,
+    a ~ dnorm(0,10) ,
+    bP ~ dnorm(0,5) ,
+    bV ~ dnorm(0,5) ,
+    bA ~ dnorm(0,5) ,
+    bPA ~ dnorm(0,5)
+  ) ,
+  data=d )
+precis(m1.2)
+
+
+#Try Stan
+m1.2.2 <- map2stan(
+  alist(
+    y ~ dbinom( n , p) ,
+    logit(p) <- a + bP*pp + bV*v+ bA*aa+bPA*pp*aa ,
+    a ~ dnorm(0,10) ,
+    bP ~ dnorm(0,5) ,
+    bV ~ dnorm(0,5) ,
+    bA ~ dnorm(0,5) ,
+    bPA ~ dnorm(0,5)
+  ) ,
+  data=d,iter=10000 , warmup=1000,chain=2) 
+precis(m1.2.2)
+
+compare(m1,m1.2)
+coeftab(m1,m1.2,m1.2.2)
+compare(m2,m1.2.2)
+
+```
+
+#####The model with interaction terms is much better than the one without, which is weighted for 0.92. The model without interaction terms is weighted for 0.08. 
+
+#####However, the coefficient of interaction terms is negative, which means that if the pirate eagle is adult and big simutaneously, the success probability would decreases. In addition, the intercept also turned negative after considering interaction terms, meaning that now for small eagles and when the pirate one is not adult, the success rate has decreased compared with previous model.
+
+```{r}
+#plot the PI
+eagles.pred.2 <- ensemble( m1 , m1.2, data=d.pred )
+eagles.med.2 <- apply( eagles.pred.2$link , 2 , median )
+eagles.PI.2 <- apply( eagles.pred.2$link , 2 , PI )
+
+# plot predicted trend for high contact islands
+plot( 0 , 0 , type="n" , xlab="Pirate Big/Victim Big/Pirate Adult" ,
+      ylab="Proportion of success" , ylim=c(0,1) , xaxt="n" ,
+      xlim=c(1,8) )
+axis( 1 , at=1:8 , labels=c("1/1/1","1/0/1","1/1/0","1/0/0","0/1/1","0/0/1","0/1/0","0/0/0") )
+
+lines( 1:8 , eagles.med , col=rangi2 )
+shade( eagles.PI , 1:8 , col=col.alpha(rangi2,0.2) )
+
+lines( 1:8 , eagles.med.2 , col='red' )
+shade( eagles.PI.2 , 1:8 , col=col.alpha('red',0.2) )
+
+
+```
+
+
+#####From the shady area comparison, we can also notice that when using weighted averaged result, the red shady area is much bigger when 0/0/0, which is when both pirate and victim are small, and pirate is not adult. This means that the success might be much lower than previous model since we consider more uncertainty.
+
+
+#Question 2
+###The data contained in data(salamanders) are counts of salamanders (Plethodon elongates) from 47 different 49-m2 plots in northern California. The column SALAMAN is the count in each plot, and the columns PCTCOVER and FORESTAGE are percent of ground cover and age of tress in the plot, respectively. You will model SALAMAN as Poisson variable.
+
+###(a) Model the relationship between density and percent cover, using a log-link (same as the example in the textbook and lecture). Use weakly informative priors of your choosing. Check the quadratic approximation again, by comparing map to map2stan. 
+
+```{r}
+data(salamanders)
+d2=salamanders
+
+m3 <- map(
+  alist(
+    SALAMAN ~ dpois( lambda ),
+    log(lambda) <- a + bP*PCTCOVER,
+    a ~ dnorm(0,100),
+    bP ~ dnorm(0,1)
+  ),
+  data=d2 )
+
+precis(m3,corr=TRUE)
+plot(precis(m3))
+
+m3.2 = map2stan(
+  m3,data=d2 , iter=3000 , warmup=1000 , chains=4 )
+precis(m3.2)
+coeftab(m3,m3.2)
+```
+###Then plot the expected counts and their 89% interval against percent cover. In which ways does the model do a good job? In which ways does it do a bad job?
+
+```{r}
+#Plot the 89%
+plot( d2$PCTCOVER , d2$SALAMAN , col=rangi2 ,
+      xlab="Ground Cover%" , ylab="# of Salamanders")
+
+
+percov.seq <- seq( from=1 , to=100 , by=1 )
+
+# compute 1~100% of ground cover percentage
+d.pred <- data.frame(
+  PCTCOVER = percov.seq
+)
+sal.pred <- ensemble( m3.2 , data=d.pred )
+sal.med <- apply( sal.pred$link , 2 , median )
+sal.PI <- apply( sal.pred$link , 2 , PI )
+
+# plot predicted trend for high contact islands
+
+lines( percov.seq , sal.med , col=rangi2 )
+shade( sal.PI , percov.seq , col=col.alpha(rangi2,0.2) )
+
+```
+
+#####The model does well when predicting the ground cover % around 0%~50%. However, when ground cover % is around 80~100, the predicted value is poor.
+
+###Can you improve the model by using other predictors, FORESTAGE? Try any models you think useful. Can you explain why the FORESTAGE helps or does not help with prediction?
+```{r}
+m4 <- map2stan(
+  alist(
+    SALAMAN ~ dpois( lambda ),
+    log(lambda) <- a + bP*PCTCOVER + bF*FORESTAGE,
+    a ~ dnorm(0,10),
+    bP ~ dnorm(0,1),
+    bF ~ dnorm(0,1)
+  ),
+  data=d2, iter=5000 , warmup=1000 , chains=2 ) 
+precis(m4)
+```
+
+```{r}
+library(rstan)
+m4.2 <- map2stan(
+  alist(
+    SALAMAN ~ dpois( lambda ),
+    log(lambda) <- a + bP*PCTCOVER + bPP*PCTCOVER*PCTCOVER,
+    a ~ dnorm(0,10),
+    bP ~ dnorm(0,1),
+    bPP ~ dnorm(0,1)
+  ),
+  data=d2, iter=10000 , warmup=1000 , chains=2 ) 
+precis(m4.2)
+
+
+m4.3 <- map2stan(
+  alist(
+    SALAMAN ~ dpois( lambda ),
+    log(lambda) <- a + bP*PCTCOVER + bPP*PCTCOVER*PCTCOVER+ bF*FORESTAGE,
+    a ~ dnorm(0,10),
+    bP ~ dnorm(0,1),
+    bPP ~ dnorm(0,1),
+    bF ~ dnorm(0,1)
+  ),
+  data=d2, iter=10000 , warmup=1000 , chains=2 ) 
+precis(m4.3)
+
+m4.4 <- map2stan(
+  alist(
+    SALAMAN ~ dpois( lambda ),
+    log(lambda) <- a[SITE] + bP*PCTCOVER + bPP*PCTCOVER*PCTCOVER,
+    a[SITE] ~ dnorm(0,10),
+    bP ~ dnorm(0,1),
+    bPP ~ dnorm(0,1)
+  ),
+  data=d2, iter=10000 , warmup=1000 , chains=1 ) 
+precis(m4.4)
+compare(m3.2,m4,m4.2,m4.4)
+coeftab(m3.2,m4,m4.2,m4.4)
+
+
+
+```
+
+####Plot the new prediction with squared term of Ground cover %
+```{r}
+plot( d2$PCTCOVER , d2$SALAMAN , col=rangi2 ,
+      xlab="Ground Cover%" , ylab="# of Salamanders" )
+
+
+percov.seq <- seq( from=1 , to=100 , length.out = 47 )
+
+# compute 1~100% of ground cover percentage
+d.pred <- data.frame(
+  PCTCOVER = percov.seq,
+  SITE = 1:47
+)
+sal.pred <- ensemble( m4.2 , data=d.pred )
+sal.med <- apply( sal.pred$link , 2 , median )
+sal.PI <- apply( sal.pred$link , 2 , PI )
+
+# plot predicted trend for high contact islands
+
+lines( percov.seq , sal.med , col=rangi2 )
+shade( sal.PI , percov.seq , col=col.alpha(rangi2,0.2) )
+
+```
+#####The prediction still can't fitt well
+
+
+####Allow intercept differ in every individual
+```{r}
+plot( d2$PCTCOVER , d2$SALAMAN , col=rangi2 ,
+      xlab="Ground Cover%" , ylab="# of Salamanders" )
+
+
+percov.seq <- seq( from=1 , to=100 , length.out = 47 )
+
+# compute 1~100% of ground cover percentage
+d.pred <- data.frame(
+  PCTCOVER = percov.seq,
+  SITE = 1:47
+)
+sal.pred <- ensemble( m4.4 , data=d.pred )
+sal.med <- apply( sal.pred$link , 2 , median )
+sal.PI <- apply( sal.pred$link , 2 , PI )
+
+# plot predicted trend for high contact islands
+
+lines( percov.seq , sal.med , col=rangi2 )
+shade( sal.PI , percov.seq , col=col.alpha(rangi2,0.2) )
+```
+
+#####The prediction fitted well around 80%~100%, but fitted poorly around 0%~40%
+
+##### Perheps it would be better to split group into 0%~60% and 80%~100% to make better prediction.
